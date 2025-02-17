@@ -1,10 +1,6 @@
-# Overview 
+# 🧬 SmallSeqFlow Overview
+Small-sample RNA sequencing experiments present unique analytical challenges yet remain common in many research settings due to cost constraints, limited biological material, or rare experimental conditions. While several established RNA-seq analysis pipelines exist, many are optimized for larger datasets or require significant computational infrastructure. To address this gap, I developed a streamlined, Python-based RNA-seq analysis pipeline specifically optimized for small-sample studies that can be easily executed in Jupyter or Google Colab notebooks.
 
+This pipeline integrates essential RNA-seq analysis steps into a series of modular functions, starting from initial data acquisition through to differential expression analysis and visualization. The workflow begins with a robust data loading function that handles compressed files from common repositories, followed by automated conversion of Ensembl IDs to gene symbols using the MyGene.info service - a crucial step for biological interpretation that is often challenging in public datasets. The pipeline then implements a comprehensive quality control visualization suite that helps researchers identify potential technical biases or batch effects before proceeding with analysis.
 
-# Pipeline Walkthrough 
-
-# Downloading Functions
-
-# Example Usage
-
-# Contributing 
+The core analytical components of the pipeline are carefully chosen to address the statistical challenges of small-sample studies. The filtering and normalization steps use a DESeq2-inspired approach that works well with limited replication, while the differential expression analysis employs Welch's t-test and Benjamini-Hochberg FDR correction - methods that maintain statistical rigor while acknowledging the limitations of small sample sizes. The final visualization module generates presentation-ready figures that capture both global expression patterns and detailed statistical metrics. The final visualization module generates publication-ready figures that capture both global expression patterns and detailed statistical metrics. Following the initial differential expression analysis, the pipeline enables seamless integration with downstream analyses including weighted gene co-expression network analysis (WGCNA) to identify gene modules, mapping of differentially expressed genes to protein-protein interaction networks, and comprehensive functional enrichment analyses to reveal biological pathways and processes. By packaging these components into a user-friendly notebook format, this pipeline makes robust RNA-seq analysis accessible to researchers working with limited samples, without requiring extensive computational resources or bioinformatics expertise.
