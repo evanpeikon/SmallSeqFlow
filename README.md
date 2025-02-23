@@ -989,10 +989,34 @@ Top 10 nodes by clustering coefficient:
 
 ![Unknown-2](https://github.com/user-attachments/assets/9f08e49a-0023-4e3f-a346-16df27467169)
 
-
-
 ## Functional Enrichment Analysis
+This code performs a comprehensive gene set enrichment analysis using the Enrichr tool through the GSEAPY package. It takes a list of differentially expressed genes and analyzes them against four different databases: Gene Ontology (GO) Biological Processes to understand what biological processes these genes are involved in, GO Molecular Functions to identify what molecular activities these genes perform, GO Cellular Components to determine where in the cell these genes' products are active, and KEGG pathways to understand which biological pathways these genes participate in.
+
+For each of these analyses, the code creates separate result sets (biological_processes, molecular_functions, cellular_components, and pathways) and displays the top results. This helps identify which biological processes, functions, locations, and pathways are statistically overrepresented in the input gene list, giving insights into the biological significance of these genes.
+
+```python
+# Define the gene lists for each model (DEGs) here
+gene_list = DEGs['Gene_Name'].dropna().astype(str).tolist()
+
+# Perform GO enrichment analysis for Biological Process (BP), Molecular Function (MF), Cellular Components (CC), and pathways 
+biological_processes = gp.enrichr(gene_list, gene_sets=['GO_Biological_Process_2018'], organism='human')
+biological_processes = biological_processes.results
+molecular_functions = gp.enrichr(gene_list, gene_sets=['GO_Molecular_Function_2018'], organism='human')
+molecular_functions = molecular_functions.results
+cellular_components = gp.enrichr(gene_list, gene_sets=['GO_Cellular_Component_2018'], organism='human')
+cellular_components = cellular_components.results
+pathways = gp.enrichr(gene_list, gene_sets=['KEGG_2016'], organism='human')
+pathways = pathways.results
+
+# View results
+biological_processes
+molecular_functions
+cellular_components
+pathways
+```
+Which produces the following output:
+
+<img width="1351" alt="Screenshot 2025-02-23 at 1 30 19 PM" src="https://github.com/user-attachments/assets/9dd2e37a-3b2e-4fe0-a1c3-52f2b451fabf" />
 
 # 🧬 Contributing and Support
-
 SmallSeqFlow is an open-source project and welcomes contributions from the community. If you encounter issues, have suggestions for improvements, or would like to contribute to the project, feel free to reach out: evanpeikon@gmail.com. 
