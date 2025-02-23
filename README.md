@@ -5,7 +5,7 @@ This pipeline integrates essential RNA-seq analysis steps into a series of modul
 
 The core analytical components of the pipeline are carefully chosen to address the statistical challenges of small-sample studies. The filtering and normalization steps use a DESeq2-inspired approach that works well with limited replication, while the differential expression analysis employs Welch's t-test and Benjamini-Hochberg FDR correction - methods that maintain statistical rigor while acknowledging the limitations of small sample sizes. 
 
-The final visualization module generates presentation-ready figures that capture both global expression patterns and detailed statistical metrics. Following the initial differential expression analysis, the pipeline enables seamless integration with downstream analyses including weighted gene co-expression network analysis (WGCNA) to identify gene modules, mapping of differentially expressed genes to protein-protein interaction networks, and comprehensive functional enrichment analyses to reveal biological pathways and processes (note: these additional functionalities have been added to the SmallSeqFlow pipeline as of 2/23/25 and can be found in the section of this repository titled "Extensions"). 
+The final visualization module generates presentation-ready figures that capture both global expression patterns and detailed statistical metrics. Following the initial differential expression analysis, the pipeline enables seamless integration with downstream analyses including weighted gene co-expression network analysis (WGCNA) to identify gene modules, mapping of differentially expressed genes to protein-protein interaction networks, and comprehensive functional enrichment analyses to reveal biological pathways and processes (these functionalities are included in the "Extensions" section of this repository). 
 
 By packaging these components into a user-friendly notebook format, this pipeline makes robust RNA-seq analysis accessible to researchers working with limited samples, without requiring extensive computational resources or bioinformatics expertise.
 
@@ -546,6 +546,452 @@ plt.show()
 With our differentially expressed genes (DEGs) identified, we can now delve into deeper biological interpretation through several complementary approaches. By mapping these DEGs to [protein-protein interaction (PPI) networks](https://github.com/evanpeikon/PPI_Network_Analysis), we can understand how the affected genes interact with each other and identify potential hub genes or regulatory networks that might be central to the biological response. This network-based analysis can reveal functional modules and biological pathways that might not be apparent from examining individual genes in isolation.
 
 Additionally, we can perform [functional enrichment analysis](https://github.com/evanpeikon/functional_enrichment_analysis) using tools like Gene Ontology (GO) terms or pathway databases (such as KEGG or Reactome) to understand the biological processes, molecular functions, and cellular components that are significantly affected in our treatment condition. For more complex insights into gene behavior, [weighted gene co-expression network analysis (WGCNA)](https://github.com/evanpeikon/co_expression_network) can be employed to identify modules of co-expressed genes and their relationships to experimental conditions. These downstream analyses transform our list of DEGs into meaningful biological insights, helping to generate hypotheses about the underlying mechanisms of the observed effects.
+
+# 🧬 Extensions
+Building on the core functionalities of SmallSeqFlow, I developed several extensions to enable deeper biological insights from small-sample RNA-seq data. The co-expression analysis module implements a correlation-based approach that constructs gene networks by calculating pairwise Spearman correlations between genes and applying significance thresholds to identify meaningful gene-gene relationships. This module includes functions for network visualization, hub gene identification, and comparative network analysis between conditions, helping reveal how treatment affects the broader organization of gene regulatory networks even in datasets with limited samples.
+
+To bridge transcriptional changes with protein-level interactions, I created a protein-protein interaction (PPI) network analysis extension that maps differentially expressed genes onto known protein interaction networks using the STRING database. This module includes functions for network construction, community detection, and centrality analysis to identify key proteins that might serve as important regulators or intervention points. The visualization components highlight both global network structure and focused subnetworks of highly connected proteins, making it easier to identify potential therapeutic targets or mechanistic insights.
+
+The functional enrichment analysis extension provides comprehensive pathway and gene set analysis capabilities. This module interfaces with multiple annotation databases (GO, KEGG, Reactome) to identify biological processes, molecular functions, and pathways enriched in differentially expressed genes or network modules. Together, these extensions transform the basic pipeline into a comprehensive toolset for extracting biological meaning from small-sample RNA-seq experiments.
+
+## Gene Co-Expression Network Analysis
+
+This function performs a comparative gene co-expression network analysis between two conditions (treatment and control) in a gene expression dataset. As input, it takes the ```filtered_normalized_count_matrix``` DataFrame containing normalized gene expression data with gene names and sample columns, along with patterns to identify treatment and control samples. For each condition, it creates a correlation network where genes are nodes, and edges represent strong correlations (above a specified threshold, default 0.7) between gene pairs. The correlation is calculated using Spearman's method on the transposed expression data (genes as columns, samples as rows).
+
+The function outputs a comprehensive analysis including: network visualizations (full networks and subnetworks of top 10 hub genes), network metrics (density, clustering, path length, etc.), hub gene analysis (top 10 most connected genes in each condition and their overlap), and distribution plots showing the degree distribution and edge weight distribution in both networks. All these results are returned in a structured dictionary and can be displayed using the accompanying print_analysis_results() function. The visualizations help identify differences in network structure between conditions, while the metrics and hub gene analysis provide quantitative measures of network differences and key genes that might be important in each condition.
+
+```python
+def analyze_gene_coexpression(filtered_normalized_countlist, treatment_pattern, control_pattern, n_genes=None, correlation_threshold=0.7):
+    # Subset the data to exclude rows with NaN values in the "Gene_Name" column
+    filtered_data = filtered_normalized_countlist.dropna(subset=["Gene_Name"])
+
+    # Subset data for treatment and control
+    treatment = filtered_data.filter(regex=treatment_pattern)
+    control = filtered_data.filter(regex=control_pattern)
+
+    # Ensure the expression data is numeric
+    treatment_data_numeric = treatment.apply(pd.to_numeric, errors='coerce')
+    control_numeric = control.apply(pd.to_numeric, errors='coerce')
+
+    # Set Gene_Name as the index
+    treatment_data_numeric = treatment_data_numeric.set_index(filtered_data["Gene_Name"])
+    control_numeric = control_numeric.set_index(filtered_data["Gene_Name"])
+
+    # Select the top n genes
+    treatment_data_numeric = treatment_data_numeric.iloc[:n_genes, :]
+    control_numeric = control_numeric.iloc[:n_genes, :]
+
+    # Transpose the expression data
+    treatment_transposed = treatment_data_numeric.T
+    control_transposed = control_numeric.T
+
+    def calculate_correlation_matrix(expression_data):
+        return expression_data.corr(method="spearman")
+
+    # Calculate correlation matrices
+    treatment_corr_matrix = calculate_correlation_matrix(treatment_transposed)
+    control_corr_matrix = calculate_correlation_matrix(control_transposed)
+
+    def create_network(corr_matrix, threshold):
+        G = nx.Graph()
+        for i, gene1 in enumerate(corr_matrix.index):
+            for j, gene2 in enumerate(corr_matrix.columns):
+                if i < j:
+                    correlation = corr_matrix.iloc[i, j]
+                    if abs(correlation) >= threshold:
+                        G.add_edge(gene1, gene2, weight=correlation)
+        return G
+
+    # Create networks
+    treatment_network = create_network(treatment_corr_matrix, correlation_threshold)
+    control_network = create_network(control_corr_matrix, correlation_threshold)
+
+    # Create network visualization with subgraphs
+    def plot_networks():
+        fig = plt.figure(figsize=(15, 12))
+        # Plot full networks
+        plt.subplot(2, 2, 1)
+        pos_treatment = nx.spring_layout(treatment_network, seed=42)
+        nx.draw(treatment_network, pos_treatment, with_labels=False, node_size=20, edge_color="lightblue")
+        plt.title(f"{treatment_pattern} Full Network")
+        plt.subplot(2, 2, 2)
+        pos_control = nx.spring_layout(control_network, seed=42)
+        nx.draw(control_network, pos_control, with_labels=False, node_size=20, edge_color="lightgreen")
+        plt.title(f"{control_pattern} Full Network")
+
+        # Create and plot subgraphs of top 10 nodes
+        def get_top_nodes_subgraph(G, n=10):
+            # Get degrees and sort nodes
+            degrees = dict(G.degree())
+            top_nodes = sorted(degrees.items(), key=lambda x: x[1], reverse=True)[:n]
+            top_node_names = [node for node, _ in top_nodes]
+            # Create subgraph
+            subgraph = G.subgraph(top_node_names)
+            return subgraph
+
+        # Treatment subgraph
+        treatment_sub = get_top_nodes_subgraph(treatment_network)
+        plt.subplot(2, 2, 3)
+        pos_treatment_sub = nx.spring_layout(treatment_sub, seed=42)
+        nx.draw(treatment_sub, pos_treatment_sub, with_labels=True, node_size=500, edge_color="lightblue", font_size=8, font_weight='bold')
+        plt.title(f"Top 10 {treatment_pattern} Genes Subnetwork")
+
+        # Control subgraph
+        control_sub = get_top_nodes_subgraph(control_network)
+        plt.subplot(2, 2, 4)
+        pos_control_sub = nx.spring_layout(control_sub, seed=42)
+        nx.draw(control_sub, pos_control_sub, with_labels=True, node_size=500, edge_color="lightgreen", font_size=8, font_weight='bold')
+        plt.title(f"Top 10 {control_pattern} Genes Subnetwork")
+        plt.tight_layout()
+        return fig
+
+    # Analyze hub genes
+    treatment_degrees = dict(treatment_network.degree())
+    control_degrees = dict(control_network.degree())
+    sorted_treatment_genes = sorted(treatment_degrees.items(), key=lambda x: x[1], reverse=True)
+    sorted_control_genes = sorted(control_degrees.items(), key=lambda x: x[1], reverse=True)
+
+    # Calculate network metrics
+    density_treatment = nx.density(treatment_network)
+    density_control = nx.density(control_network)
+
+    # Analyze hub genes overlap
+    hub_genes_treatment = set([gene for gene, degree in sorted_treatment_genes[:10]])
+    hub_genes_control = set([gene for gene, degree in sorted_control_genes[:10]])
+    common_hub_genes = hub_genes_treatment.intersection(hub_genes_control)
+    unique_treatment_hub_genes = hub_genes_treatment - hub_genes_control
+    unique_control_hub_genes = hub_genes_control - hub_genes_treatment
+
+    # Create distribution plots
+    def plot_network_distributions():
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+        # Plot 1: Cumulative Degree Distribution
+        treatment_degrees_list = sorted([d for n, d in treatment_network.degree()], reverse=True)
+        control_degrees_list = sorted([d for n, d in control_network.degree()], reverse=True)
+        treatment_cumfreq = np.arange(1, len(treatment_degrees_list) + 1) / len(treatment_degrees_list)
+        control_cumfreq = np.arange(1, len(control_degrees_list) + 1) / len(control_degrees_list)
+        ax1.plot(treatment_degrees_list, treatment_cumfreq, 'r-', label=f'{treatment_pattern}', linewidth=2)
+        ax1.plot(control_degrees_list, control_cumfreq, 'b-', label=f'{control_pattern}', linewidth=2)
+        ax1.set_xlabel('Node Degree')
+        ax1.set_ylabel('Cumulative Frequency')
+        ax1.set_title('Cumulative Degree Distribution')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+
+        # Add statistics to first plot
+        treatment_stats = f'{treatment_pattern}:\nMean degree: {np.mean(treatment_degrees_list):.2f}\nMax degree: {max(treatment_degrees_list)}'
+        control_stats = f'{control_pattern}:\nMean degree: {np.mean(control_degrees_list):.2f}\nMax degree: {max(control_degrees_list)}'
+        ax1.text(0.02, 0.98, treatment_stats, transform=ax1.transAxes,verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        ax1.text(0.02, 0.78, control_stats, transform=ax1.transAxes,verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+        # Plot 2: Edge Weight Distribution
+        treatment_weights = [d['weight'] for (u, v, d) in treatment_network.edges(data=True)]
+        control_weights = [d['weight'] for (u, v, d) in control_network.edges(data=True)]
+        bins = np.linspace(min(min(treatment_weights, default=0), min(control_weights, default=0)),max(max(treatment_weights, default=1), max(control_weights, default=1)), 20)
+        ax2.hist(treatment_weights, bins, alpha=0.5, label=treatment_pattern, color='red')
+        ax2.hist(control_weights, bins, alpha=0.5, label=control_pattern, color='blue')
+        ax2.set_xlabel('Edge Weight (Correlation Strength)')
+        ax2.set_ylabel('Frequency')
+        ax2.set_title('Edge Weight Distribution')
+        ax2.legend()
+
+        # Add statistics to second plot
+        treatment_weight_stats = f'{treatment_pattern}:\nMean weight: {np.mean(treatment_weights):.3f}\nMedian weight: {np.median(treatment_weights):.3f}'
+        control_weight_stats = f'{control_pattern}:\nMean weight: {np.mean(control_weights):.3f}\nMedian weight: {np.median(control_weights):.3f}'
+        ax2.text(0.02, 0.98, treatment_weight_stats, transform=ax2.transAxes,verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        ax2.text(0.02, 0.78, control_weight_stats, transform=ax2.transAxes,verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        plt.tight_layout()
+        return fig
+
+    # Calculate detailed network comparison metrics
+    def calculate_network_metrics():
+        metrics = {
+            'Number of Nodes': lambda g: len(g.nodes()),
+            'Number of Edges': lambda g: len(g.edges()),
+            'Average Degree': lambda g: sum(dict(g.degree()).values())/len(g),
+            'Network Density': lambda g: nx.density(g),
+            'Average Clustering': lambda g: nx.average_clustering(g),
+            'Average Path Length': lambda g: nx.average_shortest_path_length(g) if nx.is_connected(g) else 'Not connected',
+            'Number of Connected Components': lambda g: nx.number_connected_components(g)}
+
+        comparison_results = {}
+        for metric_name, metric_func in metrics.items():
+            try:
+                treatment_value = metric_func(treatment_network)
+                control_value = metric_func(control_network)
+                comparison_results[metric_name] = {
+                    'treatment': treatment_value,
+                    'control': control_value}
+            except Exception as e:
+                comparison_results[metric_name] = {
+                    'treatment': f"Error: {str(e)}",
+                    'control': f"Error: {str(e)}"}
+        return comparison_results
+
+    network_comparison = calculate_network_metrics()
+
+    # Create result dictionary
+    results = {'networks': {'treatment': treatment_network,'control': control_network},
+        'hub_genes': {'treatment_top10': sorted_treatment_genes[:10],'control_top10': sorted_control_genes[:10],'common': common_hub_genes,'unique_treatment': unique_treatment_hub_genes,'unique_control': unique_control_hub_genes},
+        'network_metrics': {'treatment_density': density_treatment,'control_density': density_control,'detailed_comparison': network_comparison},
+        'figures': {'networks': plot_networks(),'distributions': plot_network_distributions()}}
+    return results
+
+def print_analysis_results(results):
+    # Print network comparison metrics
+    comparison_metrics = results['network_metrics']['detailed_comparison']
+    print("\nDetailed Network Comparison:")
+    for metric_name, values in comparison_metrics.items():
+        print(f"\n{metric_name}:")
+        treatment_value = values['treatment']
+        control_value = values['control']
+        if isinstance(treatment_value, (int, float)):
+            print(f"Treatment: {treatment_value:.3f}")
+            print(f"Control: {control_value:.3f}")
+        else:
+            print(f"Treatment: {treatment_value}")
+            print(f"Control: {control_value}")
+
+    # Print hub genes
+    print("\nTop 10 Hub Genes:")
+    print("\nTreatment hub genes:")
+    for gene, degree in results['hub_genes']['treatment_top10']:
+        print(f"{gene}: {degree} connections")
+    print("\nControl hub genes:")
+    for gene, degree in results['hub_genes']['control_top10']:
+        print(f"{gene}: {degree} connections")
+    print("\nHub Gene Analysis:")
+    print(f"Common hub genes between networks: {len(results['hub_genes']['common'])}")
+    print("Common genes:", results['hub_genes']['common'])
+    print(f"\nUnique to treatment: {len(results['hub_genes']['unique_treatment'])}")
+    print("Genes:", results['hub_genes']['unique_treatment'])
+    print(f"\nUnique to control: {len(results['hub_genes']['unique_control'])}")
+    print("Genes:", results['hub_genes']['unique_control'])
+```
+```python
+# example usage
+results = analyze_gene_coexpression(
+    filtered_normalized_count_matrix,
+    treatment_pattern="AMIL", # Select columns with "AMIL" in their names (use appropriate keyword for your own data)
+    control_pattern="CTRL", # Select columns with "CTRL" in their names (use appropriate keyword for your own data)
+    n_genes = 100 # of genes to include in analysis (use n_genes = NONE to include all genes in your dataset)
+    )
+
+print_analysis_results(results)
+
+# Display figures (
+plt.figure()
+plt.show(results['figures']['networks'])
+plt.figure()
+plt.show(results['figures']['distributions'])
+```
+Which produces the following outputs:
+```
+Detailed Network Comparison:
+
+Number of Nodes:
+Treatment: 100.000
+Control: 100.000
+
+Number of Edges:
+Treatment: 1634.000
+Control: 1703.000
+
+Average Degree:
+Treatment: 32.680
+Control: 34.060
+
+Network Density:
+Treatment: 0.330
+Control: 0.344
+
+Average Clustering:
+Treatment: 1.000
+Control: 1.000
+
+Average Path Length:
+Treatment: Not connected
+Control: Not connected
+
+Number of Connected Components:
+Treatment: 3.000
+Control: 3.000
+
+Top 10 Hub Genes:
+
+Treatment hub genes:
+NFYA: 37 connections
+STPG1: 37 connections
+LAS1L: 37 connections
+ENPP4: 37 connections
+BAD: 37 connections
+MAD1L1: 37 connections
+DBNDD1: 37 connections
+RBM5: 37 connections
+ARF5: 37 connections
+SARM1: 37 connections
+
+Control hub genes:
+FIRRM: 43 connections
+FUCA2: 43 connections
+GCLC: 43 connections
+NFYA: 43 connections
+STPG1: 43 connections
+LAS1L: 43 connections
+SEMA3F: 43 connections
+ANKIB1: 43 connections
+KRIT1: 43 connections
+LASP1: 43 connections
+
+Hub Gene Analysis:
+Common hub genes between networks: 3
+Common genes: {'STPG1', 'LAS1L', 'NFYA'}
+
+Unique to treatment: 7
+Genes: {'DBNDD1', 'ENPP4', 'ARF5', 'BAD', 'SARM1', 'MAD1L1', 'RBM5'}
+
+Unique to control: 7
+Genes: {'LASP1', 'GCLC', 'ANKIB1', 'FUCA2', 'FIRRM', 'SEMA3F', 'KRIT1'}
+```
+
+![Unknown](https://github.com/user-attachments/assets/dab0e208-328c-44ee-a405-f3e0f3c92ba5)
+![Unknown-1](https://github.com/user-attachments/assets/6e384b53-4518-4656-8296-450f94251b96)
+
+As you can see, the function generates two main sets of visualizations that help understand the network structure and properties in both treatment and control conditions:
+
+The first figure shows a 2x2 panel of network visualizations. The top row displays the full networks for both conditions, where each node represents a gene and each edge represents a strong correlation (>0.7 by default) between two genes. These full networks give an overview of the global connectivity patterns. The bottom row shows focused subnetworks containing only the top 10 most connected genes (hub genes) and their interactions with each other, making it easier to visualize the key players in each network. The node size in the subnetworks is larger and includes labels to clearly identify these important genes. These visualizations help identify whether the treatment condition leads to different connectivity patterns or hub genes compared to control.
+
+The second figure shows two distribution plots that provide quantitative insights into network properties. The left plot shows the cumulative degree distribution for both networks, indicating how node connectivity is distributed (e.g., whether most genes have few connections or if there are many highly connected genes). The right plot shows the distribution of edge weights (correlation strengths), helping understand if the correlations in one condition tend to be stronger or weaker than in the other. Both plots include summary statistics in text boxes, making it easy to compare numerical differences between conditions. Together, these visualizations help identify whether the treatment affects the overall organization of gene co-expression patterns and which genes might be playing central roles in each condition.
+
+## Protein-Protein Interaction (PPI) Network Analysis
+This function performs protein-protein interaction (PPI) network analysis using gene lists from differential expression results. It takes as input a list of gene identifiers (ENSEMBL IDs), an optional confidence score threshold (default 0.7) for filtering interactions, and a species identifier (default 'human'). The function queries the STRING database to fetch known protein-protein interactions for the input genes, filtering out low-confidence interactions based on the specified threshold.
+
+The function then constructs a network where proteins are nodes and interactions are edges, then performs several network analyses including calculating basic network metrics (number of nodes, edges, density, connected components) and different centrality measures (degree, betweenness, and clustering coefficients). These measures help identify important proteins in the network - degree centrality identifies highly connected hub proteins, betweenness centrality finds proteins that serve as important bridges between different parts of the network, and clustering coefficients identify proteins that form tight-knit groups.
+
+The function outputs both numerical results and visualizations. The numerical results include network statistics and lists of the top 10 proteins ranked by each centrality measure. The visualizations include four plots: the complete PPI network, subnetworks focusing on the top 20 proteins by degree and betweenness centrality (showing their direct interactions), and a histogram showing the distribution of node degrees in the network. All results are returned in a structured dictionary that can be easily accessed for further analysis or visualization customization.
+
+```python
+def analyze_ppi_network(gene_list, score_threshold=0.7, species='human'):
+    def fetch_string_ppi(genes, species):
+        """Fetch PPI data from STRING database"""
+        base_url = "https://string-db.org/api/tsv/network"
+        genes_str = "\n".join(genes)
+        params = {'identifiers': genes_str, 'species': species, 'limit': 1}
+        response = requests.post(base_url, data=params)
+        if response.status_code == 200:
+            return response.text
+        else:
+            print(f"Failed to fetch data from STRING: {response.status_code}")
+            return None
+
+    # Fetch and process PPI data
+    ppi_data = fetch_string_ppi(gene_list, species)
+    if ppi_data is None:
+        raise ValueError("No PPI data retrieved. Check your input or STRING database connection.")
+    
+    # Parse data and filter by score
+    ppi_df = pd.read_csv(StringIO(ppi_data), sep="\t")
+    ppi_df_filtered = ppi_df[ppi_df['score'] > score_threshold]
+    
+    # Create network
+    G = nx.Graph()
+    for _, row in ppi_df_filtered.iterrows():
+        G.add_edge(row['preferredName_A'], row['preferredName_B'], weight=row['score'])
+    
+    # Calculate network metrics
+    network_metrics = {'num_nodes': G.number_of_nodes(),'num_edges': G.number_of_edges(),'density': nx.density(G),'num_components': len(list(nx.connected_components(G)))}
+    
+    # Calculate node centralities
+    degree_centrality = nx.degree_centrality(G)
+    betweenness_centrality = nx.betweenness_centrality(G)
+    clustering_coefficients = nx.clustering(G)
+    
+    # Get top nodes by different metrics
+    top_nodes = {
+        'degree': sorted(degree_centrality.items(), key=lambda x: x[1], reverse=True)[:10],
+        'betweenness': sorted(betweenness_centrality.items(), key=lambda x: x[1], reverse=True)[:10],
+        'clustering': sorted(clustering_coefficients.items(), key=lambda x: x[1], reverse=True)[:10]}
+    
+    def create_network_figures():
+        fig = plt.figure(figsize=(20, 20))
+        # Full network (top left)
+        plt.subplot(2, 2, 1)
+        nx.draw_networkx(G, node_size=50, with_labels=True, font_size=8, width=1, alpha=0.7)
+        plt.title('Full PPI Network', pad=20, size=14)
+        
+        # Node degree distribution (top right)
+        plt.subplot(2, 2, 2)
+        degrees = [d for n, d in G.degree()]
+        plt.hist(degrees, bins=max(10, max(degrees)), alpha=0.7)
+        plt.xlabel('Node Degree')
+        plt.ylabel('Frequency')
+        plt.title('Node Degree Distribution', pad=20, size=14)
+        
+        # Top 20 nodes by degree centrality (bottom left)
+        plt.subplot(2, 2, 3)
+        top_degree_nodes = [node for node, _ in sorted(degree_centrality.items(), key=lambda x: x[1], reverse=True)[:20]]
+        subgraph_degree = G.subgraph(top_degree_nodes)
+        nx.draw_networkx(subgraph_degree, node_size=500, node_color='skyblue', with_labels=True, font_size=10)
+        plt.title("Top 20 Nodes by Degree Centrality", pad=20, size=14)
+        
+        # Top 20 nodes by betweenness centrality (bottom right)
+        plt.subplot(2, 2, 4)
+        top_betweenness_nodes = [node for node, _ in sorted(betweenness_centrality.items(), key=lambda x: x[1], reverse=True)[:20]]
+        subgraph_betweenness = G.subgraph(top_betweenness_nodes)
+        nx.draw_networkx(subgraph_betweenness, node_size=500, node_color='lightgreen', with_labels=True, font_size=10)
+        plt.title("Top 20 Nodes by Betweenness Centrality", pad=20, size=14)
+        plt.tight_layout()
+        return fig
+    
+    # Create visualization
+    figure = create_network_figures()
+    
+    # Return results
+    results = {'network': G,'metrics': network_metrics,'top_nodes': top_nodes,'figure': figure}
+    return results
+
+def print_ppi_results(results):
+    # Print network metrics
+    print(f"Number of nodes: {results['metrics']['num_nodes']} "
+          f"Number of edges: {results['metrics']['num_edges']} "
+          f"Network density: {results['metrics']['density']:.3f} "
+          f"Number of connected components: {results['metrics']['num_components']}")
+    
+    # Print top nodes
+    print("\nTop 10 nodes by degree centrality:")
+    print([node for node, _ in results['top_nodes']['degree']])       
+    print("\nTop 10 nodes by betweenness centrality:")
+    print([node for node, _ in results['top_nodes']['betweenness']])
+    print("\nTop 10 nodes by clustering coefficient:")
+    print([node for node, _ in results['top_nodes']['clustering']])
+```
+```python
+# Example usage:
+gene_list = DEGs['gene'].tolist()  # Use the `gene` column (ENSEMBL IDs)
+results = analyze_ppi_network(gene_list)
+print_ppi_results(results)
+plt.figure()
+plt.show(results['figure'])
+```
+Which produces the following outputs:
+```
+Number of nodes: 62 Number of edges: 67 Network density: 0.035 Number of connected components: 18
+
+Top 10 nodes by degree centrality:
+['HLA-DRA', 'MT-CO1', 'HLA-DOA', 'HLA-DQA1', 'HLA-DMB', 'HLA-DMA', 'NDUFB1', 'MT-ND6', 'MT-ND3', 'MT-ND4']
+
+Top 10 nodes by betweenness centrality:
+['EEF1A1', 'MT-CO1', 'HLA-DRA', 'CENPM', 'CALM3', 'AKAP5', 'TK1', 'CDC45', 'RAPGEF3', 'HLA-DQA1']
+
+Top 10 nodes by clustering coefficient:
+['SPC24', 'CENPH', 'CIITA', 'MSMO1', 'MVD', 'DHCR7', 'PTPN22', 'NDUFB1', 'MT-ND6', 'MT-ND3']
+```
+
+![Unknown-2](https://github.com/user-attachments/assets/9f08e49a-0023-4e3f-a346-16df27467169)
+
+
+
+## Functional Enrichment Analysis
 
 # 🧬 Contributing and Support
 
